@@ -36,14 +36,15 @@ The Python file `custom_layers_torch.py` provides symmetric convolutional layers
 
 ```python
 import torch.nn as nn
-class CNN_2D(nn.Module):
 
+
+class CNN_2D(nn.Module):
     def __init__(self):
         super(CNN_2D, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3)
-        self.conv2 = nn.Conv2d(self.conv1.out_channels, 16, kernel_size=3)
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=(3, 3))
+        self.conv2 = nn.Conv2d(self.conv1.out_channels, 16, kernel_size=(3, 3))
         self.batchnorm = nn.BatchNorm2d(self.conv2.out_channels)
-        self.conv3 = nn.Conv2d(self.conv2.out_channels, 32, kernel_size=3)
+        self.conv3 = nn.Conv2d(self.conv2.out_channels, 32, kernel_size=(3, 3))
         self.conv_drop = nn.Dropout2d()
 
         self.fc1 = nn.Linear(10*10*self.conv3.out_channels, 1024)
@@ -51,6 +52,7 @@ class CNN_2D(nn.Module):
         self.fc2 = nn.Linear(self.fc1.out_features, 1)
 
     def forward(self, x):
+        """Forward."""
         ...
 ```
 
@@ -64,11 +66,11 @@ class CNN_2D(nn.Module):
 
     def __init__(self):
         super(CNN_2D, self).__init__()
-        self.conv1 = SymmetricConv2d(in_channels=1, out_channels=16, kernel_size=3, \
+        self.conv1 = SymmetricConv2d(in_channels=1, out_channels=16, kernel_size=3,
             symmetry={'h':2, 'v':4, 'hv':8})
-        self.conv2 = nn.Conv2d(self.conv1.out_channels, 16, kernel_size=3)
+        self.conv2 = nn.Conv2d(self.conv1.out_channels, 16, kernel_size=(3, 3))
         self.batchnorm = nn.BatchNorm2d(self.conv2.out_channels)
-        self.conv3 = nn.Conv2d(self.conv2.out_channels, 32, kernel_size=3)
+        self.conv3 = nn.Conv2d(self.conv2.out_channels, 32, kernel_size=(3, 3))
         self.conv_drop = nn.Dropout2d()
 
         self.fc1 = nn.Linear(10*10*self.conv3.out_channels, 1024)
@@ -76,6 +78,7 @@ class CNN_2D(nn.Module):
         self.fc2 = nn.Linear(self.fc1.out_features, 1)
 
     def forward(self, x):
+        """Forward."""
         ...
 ```
 
@@ -102,5 +105,5 @@ symmetry = {'h':'50%', 'v':'50%'}
 inputs = layers.Input(im.shape[1:])
 x = SymmetricConv2D(32, (5, 5), symmetry=sym, share_bias=share_bias)(inputs)
 
-# ... more layers here ...
+# ... more layers here ...
 ```

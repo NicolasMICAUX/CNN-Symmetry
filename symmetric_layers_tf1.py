@@ -1,31 +1,35 @@
-'''Symmetric convolution layers for Tensorflow 1
+"""Symmetric convolution layers for Tensorflow 1
 
-This module provides two layers that can be used in 2D Convolutional Neural Networks. 
+This module provides two layers that can be used in 2D Convolutional Neural Networks.
 SymmetricConv2D provides an extension of Conv2D that adds weight sharing between pairs of
-filters (horizontal or vertical reflection symmetry). SymmetricConv2DTranspose provides a symmetric 
+filters (horizontal or vertical reflection symmetry). SymmetricConv2DTranspose provides a symmetric
 extension of Conv2DTranspose.
 
 List of classes:
 - SymmetricConv2D
 - SymmetricConv2DTranspose
 
-'''
-# (c) matthias treder
+(c) matthias treder
+"""
 import torch.nn as nn
+import tensorflow as tf
+import tensorflow.keras.layers
+
 
 
 class SymmetricConv2D(nn.Conv2d):
 
-    def __init__(self, filters, kernel_size,  symmetry={}, share_bias=True, **kwargs):
-        '''
+    def __init__(self, filters, kernel_size, symmetry={}, share_bias=True, **kwargs):
+        """
         symmetry - dict, number of filter flipped horizontally, vertically, or about both axes
         share_bias - if True, the biases of symmetric filters are also shared
-        '''
+        """
         super(SymmetricConv2D, self).__init__(filters, kernel_size, **kwargs)
 
         # Set defaults for symmetric filters pairs
         # make sure it's not checkpointed to not raise errors when saving weights
-        sym = dict(symmetry) # make a copy
+        self.kernel = None
+        sym = dict(symmetry)  # make a copy
         sym.setdefault('h', 0)
         sym.setdefault('v', 0)
         sym.setdefault('hv', 0)
@@ -34,21 +38,21 @@ class SymmetricConv2D(nn.Conv2d):
         # If symmetric filters are specified as percentages, calculate the
         # absolute numbers here
         for key, val in sym.items():
-            if (type(val) is str) and (val[-1]=='%'):
+            if (type(val) is str) and (val[-1] == '%'):
                 val = round(float(val[:-1]) * self.filters / 100)
                 # Make sure number of filters is divisible by 2 or 4
-                if key in ['h','v']:
+                if key in ['h', 'v']:
                     val = (val // 2) * 2
-                elif key=='hv':
+                elif key == 'hv':
                     val = (val // 4) * 4
                 sym[key] = val
 
         # Check if number of filters is divisible by 2 resp. 4
         for key, val in sym.items():
-                if (key in ['h','v']) and (val % 2 != 0):
-                    raise ValueError('Number of symmetric h and v filters must be divisible by 2')
-                elif (key=='hv') and (val % 4 != 0):
-                    raise ValueError('Number of symmetric hv filters must be divisible by 4')
+            if (key in ['h', 'v']) and (val % 2 != 0):
+                raise ValueError('Number of symmetric h and v filters must be divisible by 2')
+            elif (key == 'hv') and (val % 4 != 0):
+                raise ValueError('Number of symmetric hv filters must be divisible by 4')
 
         # Number of symmetric and non-symmetric filters
         self.filters_sym = sym['h'] + sym['v'] + sym['hv']
@@ -61,19 +65,18 @@ class SymmetricConv2D(nn.Conv2d):
         self.hv = sym['hv']
         print('Symmetry:', self.h, self.v, self.hv)
 
-
     def flip_filter(self, kernel, axis):
-        '''Creates symmetric filters by flipping a filter along one or more axes.
+        """Creates symmetric filters by flipping a filter along one or more axes.
            Since the tf.image functions are used to do the flipping the
            dimensions of the filters need to be permuted accordingly.
-        '''
+        """
         if type(axis) is not list:
             axis = [axis]
-        # image: 4-D Tensor of shape [batch, height, width, channels]
+        # image: 4-D Tensor of shape [batch, height, width, channels]
         #     or 3-D Tensor of shape [height, width, channels]
         # However, the filter tensor is [filter_height, filter_width, n_input_chans, n_filters]
         # so we first transpose it into [n_filters, filter_height, filter_width, n_input_chans]
-        # treating n_filters as if it was the batch
+        # treating n_filters as if it was the batch
         kernel = tf.transpose(kernel, perm=[3, 0, 1, 2])
         if 'v' in axis:
             kernel = tf.image.flip_up_down(kernel)
@@ -92,7 +95,7 @@ class SymmetricConv2D(nn.Conv2d):
             raise ValueError('The channel dimension of the inputs '
                              'should be defined. Found `None`.')
 
-        #input_shape = input_shape.as_list()
+        # input_shape = input_shape.as_list()
         input_dim = int(input_shape[channel_axis])
 
         # --- Start symmetric kernel definition ---
@@ -103,51 +106,50 @@ class SymmetricConv2D(nn.Conv2d):
         # Create symmetric filter pairs: symmetric about y (vertical) axis
         if self.h > 0:
             x = self.add_weight(name='kernel_sym_h',
-                                          shape=shape + (self.h//2,),
-                                          initializer=self.kernel_initializer,
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype)
+                                shape=shape + (self.h // 2,),
+                                initializer=self.kernel_initializer,
+                                regularizer=self.kernel_regularizer,
+                                constraint=self.kernel_constraint,
+                                trainable=True,
+                                dtype=self.dtype)
             kernels.extend([x, self.flip_filter(x, axis='h')])
 
         # Create symmetric filter pairs: symmetric about x (horizontal) axis
         if self.v > 0:
             x = self.add_weight(name='kernel_sym_v',
-                                          shape=shape + (self.v//2,),
-                                          initializer=self.kernel_initializer,
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype)
+                                shape=shape + (self.v // 2,),
+                                initializer=self.kernel_initializer,
+                                regularizer=self.kernel_regularizer,
+                                constraint=self.kernel_constraint,
+                                trainable=True,
+                                dtype=self.dtype)
             kernels.extend([x, self.flip_filter(x, axis='v')])
 
         # Create symmetric filter quadruples: symmetric about x or y axes
         if self.hv > 0:
             x = self.add_weight(name='kernel_sym_hv',
-                                          shape=shape + (self.hv//4,),
-                                          initializer=self.kernel_initializer,
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype)
-            kernels.extend([x, self.flip_filter(x, axis='h'), \
-                               self.flip_filter(x, axis='v'), \
-                               self.flip_filter(x, axis=['h', 'v'])])
-
+                                shape=shape + (self.hv // 4,),
+                                initializer=self.kernel_initializer,
+                                regularizer=self.kernel_regularizer,
+                                constraint=self.kernel_constraint,
+                                trainable=True,
+                                dtype=self.dtype)
+            kernels.extend([x, self.flip_filter(x, axis='h'),
+                            self.flip_filter(x, axis='v'),
+                            self.flip_filter(x, axis=['h', 'v'])])
 
         # Expand dims of symmetric kernels from 3D to 4D
-        #kernels = [tf.expand_dims(x, axis=3) for x in kernels]
+        # kernels = [tf.expand_dims(x, axis=3) for x in kernels]
 
         # Build non-symmetric filter kernels
         if self.filters_nonsym > 0:
             kernels.append(self.add_weight(shape=shape + (self.filters_nonsym,),
-                                          initializer=self.kernel_initializer,
-                                          name='kernel_nonsym',
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype))
+                                           initializer=self.kernel_initializer,
+                                           name='kernel_nonsym',
+                                           regularizer=self.kernel_regularizer,
+                                           constraint=self.kernel_constraint,
+                                           trainable=True,
+                                           dtype=self.dtype))
 
         # Concatenate all kernels
         self.kernel = tf.concat(kernels, -1)
@@ -160,32 +162,32 @@ class SymmetricConv2D(nn.Conv2d):
                 # Make symmetric filter pairs share the bias term as well
                 biases = []
                 if self.v > 0:
-                    x = self.add_weight(shape=(self.v//2,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_v',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                    x = self.add_weight(shape=(self.v // 2,),
+                                        initializer=self.bias_initializer,
+                                        name='bias_v',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.extend([x, x])
                 if self.h > 0:
-                    x = self.add_weight(shape=(self.h//2,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_h',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                    x = self.add_weight(shape=(self.h // 2,),
+                                        initializer=self.bias_initializer,
+                                        name='bias_h',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.extend([x, x])
                 if self.hv > 0:
-                    x = self.add_weight(shape=(self.hv//4,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_hv',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                    x = self.add_weight(shape=(self.hv // 4,),
+                                        initializer=self.bias_initializer,
+                                        name='bias_hv',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.extend([x, x, x, x])
                 if self.filters_nonsym > 0:
                     x = self.add_weight(shape=(self.filters_nonsym,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_nonsym',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                                        initializer=self.bias_initializer,
+                                        name='bias_nonsym',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.append(x)
                 self.bias = tf.concat(biases, -1)
 
@@ -201,7 +203,7 @@ class SymmetricConv2D(nn.Conv2d):
 
         # Set input spec.
         self.input_spec = layers.InputSpec(ndim=self.rank + 2,
-                                    axes={channel_axis: input_dim})
+                                           axes={channel_axis: input_dim})
 
         if self.padding == 'causal':
             op_padding = 'valid'
@@ -217,18 +219,19 @@ class SymmetricConv2D(nn.Conv2d):
             strides=self.strides,
             padding=op_padding,
             data_format=conv_utils.convert_data_format(self.data_format,
-    self.rank + 2))
+                                                       self.rank + 2))
         self.built = True
+
 
 class SymmetricConv2DTranspose(SymmetricConv2D):
 
     def __init__(self,
-               filters,
-               kernel_size,
-               strides=(1, 1),
-               output_padding=None,
-               dilation_rate=(1, 1),
-               **kwargs):
+                 filters,
+                 kernel_size,
+                 strides=(1, 1),
+                 output_padding=None,
+                 dilation_rate=(1, 1),
+                 **kwargs):
 
         super(SymmetricConv2DTranspose, self).__init__(
             filters=filters,
@@ -243,8 +246,9 @@ class SymmetricConv2DTranspose(SymmetricConv2D):
             for stride, out_pad in zip(self.strides, self.output_padding):
                 if out_pad >= stride:
                     raise ValueError('Stride ' + str(self.strides) + ' must be '
-                               'greater than output padding ' +
-                               str(self.output_padding))
+                                                                     'greater than output padding ' +
+                                     str(self.output_padding))
+
     def build(self, input_shape):
         # like in SymmetricConv2D but the last part on op_padding
         # and convolution_op has been removed
@@ -256,7 +260,7 @@ class SymmetricConv2DTranspose(SymmetricConv2D):
             raise ValueError('The channel dimension of the inputs '
                              'should be defined. Found `None`.')
 
-        #input_shape = input_shape.as_list()
+        # input_shape = input_shape.as_list()
         input_dim = int(input_shape[channel_axis])
 
         # --- Start symmetric kernel definition ---
@@ -267,51 +271,50 @@ class SymmetricConv2DTranspose(SymmetricConv2D):
         # Create symmetric filter pairs: symmetric about y (vertical) axis
         if self.h > 0:
             x = self.add_weight(name='kernel_sym_h',
-                                          shape=shape + (self.h//2,),
-                                          initializer=self.kernel_initializer,
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype)
+                                shape=shape + (self.h // 2,),
+                                initializer=self.kernel_initializer,
+                                regularizer=self.kernel_regularizer,
+                                constraint=self.kernel_constraint,
+                                trainable=True,
+                                dtype=self.dtype)
             kernels.extend([x, self.flip_filter(x, axis='h')])
 
         # Create symmetric filter pairs: symmetric about x (horizontal) axis
         if self.v > 0:
             x = self.add_weight(name='kernel_sym_v',
-                                          shape=shape + (self.v//2,),
-                                          initializer=self.kernel_initializer,
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype)
+                                shape=shape + (self.v // 2,),
+                                initializer=self.kernel_initializer,
+                                regularizer=self.kernel_regularizer,
+                                constraint=self.kernel_constraint,
+                                trainable=True,
+                                dtype=self.dtype)
             kernels.extend([x, self.flip_filter(x, axis='v')])
 
         # Create symmetric filter quadruples: symmetric about x or y axes
         if self.hv > 0:
             x = self.add_weight(name='kernel_sym_hv',
-                                          shape=shape + (self.hv//4,),
-                                          initializer=self.kernel_initializer,
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype)
+                                shape=shape + (self.hv // 4,),
+                                initializer=self.kernel_initializer,
+                                regularizer=self.kernel_regularizer,
+                                constraint=self.kernel_constraint,
+                                trainable=True,
+                                dtype=self.dtype)
             kernels.extend([x, self.flip_filter(x, axis='h'), \
-                               self.flip_filter(x, axis='v'), \
-                               self.flip_filter(x, axis=['h', 'v'])])
-
+                            self.flip_filter(x, axis='v'), \
+                            self.flip_filter(x, axis=['h', 'v'])])
 
         # Expand dims of symmetric kernels from 3D to 4D
-        #kernels = [tf.expand_dims(x, axis=3) for x in kernels]
+        # kernels = [tf.expand_dims(x, axis=3) for x in kernels]
 
         # Build non-symmetric filter kernels
         if self.filters_nonsym > 0:
             kernels.append(self.add_weight(shape=shape + (self.filters_nonsym,),
-                                          initializer=self.kernel_initializer,
-                                          name='kernel_nonsym',
-                                          regularizer=self.kernel_regularizer,
-                                          constraint=self.kernel_constraint,
-                                          trainable=True,
-                                          dtype=self.dtype))
+                                           initializer=self.kernel_initializer,
+                                           name='kernel_nonsym',
+                                           regularizer=self.kernel_regularizer,
+                                           constraint=self.kernel_constraint,
+                                           trainable=True,
+                                           dtype=self.dtype))
 
         # Concatenate all kernels
         self.kernel = tf.concat(kernels, -1)
@@ -324,32 +327,32 @@ class SymmetricConv2DTranspose(SymmetricConv2D):
                 # Make symmetric filter pairs share the bias term as well
                 biases = []
                 if self.v > 0:
-                    x = self.add_weight(shape=(self.v//2,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_v',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                    x = self.add_weight(shape=(self.v // 2,),
+                                        initializer=self.bias_initializer,
+                                        name='bias_v',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.extend([x, x])
                 if self.h > 0:
-                    x = self.add_weight(shape=(self.h//2,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_h',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                    x = self.add_weight(shape=(self.h // 2,),
+                                        initializer=self.bias_initializer,
+                                        name='bias_h',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.extend([x, x])
                 if self.hv > 0:
-                    x = self.add_weight(shape=(self.hv//4,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_hv',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                    x = self.add_weight(shape=(self.hv // 4,),
+                                        initializer=self.bias_initializer,
+                                        name='bias_hv',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.extend([x, x, x, x])
                 if self.filters_nonsym > 0:
                     x = self.add_weight(shape=(self.filters_nonsym,),
-                                                initializer=self.bias_initializer,
-                                                name='bias_nonsym',
-                                                regularizer=self.bias_regularizer,
-                                                constraint=self.bias_constraint)
+                                        initializer=self.bias_initializer,
+                                        name='bias_nonsym',
+                                        regularizer=self.bias_regularizer,
+                                        constraint=self.bias_constraint)
                     biases.append(x)
                 self.bias = tf.concat(biases, -1)
 
@@ -365,7 +368,7 @@ class SymmetricConv2DTranspose(SymmetricConv2D):
 
         # Set input spec.
         self.input_spec = layers.InputSpec(ndim=self.rank + 2,
-                                    axes={channel_axis: input_dim})
+                                           axes={channel_axis: input_dim})
 
         self.built = True
 
@@ -465,4 +468,3 @@ class SymmetricConv2DTranspose(SymmetricConv2D):
         config = super(SymmetricConv2DTranspose, self).get_config()
         config['output_padding'] = self.output_padding
         return config
-
